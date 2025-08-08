@@ -68,6 +68,28 @@ void dfs_collect(TrieNode* node, char* buffer, int depth) {
     }
 }
 
+void normalize(char* word) {
+    for(int i = 0; word[i] != '\0'; i++){
+        word[i] = tolower((unsigned char)word[i]);
+    }
+}
+
+char* complete_first_match(TrieNode* root, const char* prefix){
+    TrieNode* start = find_prefix_node(root, prefix);
+    if(!start) return NULL;
+
+    char buffer[MAX_WORD_LEN];
+    strcpy(buffer, prefix);
+
+    if(dfs_first(start, buffer, strlen(prefix))){
+        char* result = malloc(strlen(buffer) + 1);
+        strcpy(result, buffer);
+        return result;
+    }
+    return NULL;
+}
+
+
 void autocomplete(TrieNode* root, const char* prefix) {
     TrieNode* start = find_prefix_node(root, prefix);
     if (!start) {
