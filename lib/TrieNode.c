@@ -148,7 +148,58 @@ static void push_string(char*** out, int* n, int* cap, const char* s){
     (*out)[(*n)++] = strdup(s);
 }
 
+static void dfs_collect(const RadixNode* node, char* buffer, int buf_len, int buf_cap, char*** out, int* out_n, int* out_cap){
+    if(node->is_end_of_word){
+        //buffer scratch string building
+        buffer[buf_len] = '\0';
+        push_string(out, out_n, out_cap, buffer);
+    }
+    
+    for(int i = 0; i < node->num_edges; ++i){
+        const RadixEdge* e = &node->edges[i];
+        //lab_len -> the bytes that are going to be appended this step
+        int lab_len = (int)strlen(e->label);
+        //buf_len (how many bytes are meaningful) - buf_cap (buffer space)
+        //checking to see if we can add the previous word plus the bytes that we're going to append this step + 1 ('\0')
+        if(buf_len + lab_len + 1 > buf_cap){
+            
+            int new_cap = buf_cap;
+            while(buf_len + lab_len + 1 > new_cap) new_cap = (new_cap == 0) ? 32 : (new_cap *2);
+            char* grown = malloc(new_cap);
+            //copy whats already in buffer (current no. of chars buf_len) into grown
+            memcpy(grown, buffer, buf_len);\
+            //set the buffer as grown (which now includes old buffer + new mem
+            buffer = grown;
+            //increase the cap so next time we run out (dynamic malloc)
+            buf_cap = new_cap;
+        }
 
+        memcpy(buffer + buf_len, e->label, lab_len);
 
+        dfs_collect(e->child, buffer, buf_len + lab_len, buf_cap, out, out_n, out_cap);
+    }
+}
 
+char** radix_autocomplete(const RadixNode* root, const char* prefix, int* out_count){
+    *out_count = 0;
+
+    const RadixNode* at = radix_find_prefix(root, prefix);
+    if(!at) return NULL;
+
+    int buf_cap = (int)strlen(prefix) + 16;
+    char* buffer = malloc(buf_cap);
+    int buf_len = (int)strlen(prefix);
+    memcpy(buffer, prefix, buf_len);
+
+    char** results = NULL;
+    int n = 0, cap = 0;
+
+    dfs_collect(at, buffer, buf_len, buf_cap, &results, &n, &cap);
+
+    free(buffer);
+
+    *out_count = n;
+
+    return results;
+}
 
