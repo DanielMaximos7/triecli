@@ -5,108 +5,150 @@
 #define ALPHABET_SIZE 26
 #define MAX_WORD_LEN 100
 
-typedef struct TrieNode {
-    struct TrieNode* children[ALPHABET_SIZE];
-    int is_end_of_word;
-} TrieNode;
+typedef struct RadixNode RadixNode;
 
-TrieNode* create_node() {
-    TrieNode* node = malloc(sizeof(TrieNode));
-    if (node) {
-        node->is_end_of_word = 0;
-        for (int i = 0; i < ALPHABET_SIZE; i++)
-            node->children[i] = NULL;
-    }
+typedef struct {
+    char* label;
+    RadixNode* child;
+} RadixEdge;
+
+struct RadixNode {
+    RadixEdge* edges;
+    int num_edges;
+    int cap_edges;
+    int is_end_of_word;
+    int frequency;
+};
+
+RadixNode* radix_create_node(){
+    RadixNode* node = malloc(sizeof(RadixNode));
+    if(!node) return NULL;
+
+    node->edges = NULL;
+    node->num_edges = 0;
+    node->cap_edges = 0;
+    node->is_end_of_word 0;
+    node->frequency = 0;
     return node;
 }
 
-void insert(TrieNode* root, const char* word) {
-    TrieNode* curr = root;
-    for (int i = 0; word[i] != '\0'; i++) {
-        int idx = word[i] - 'a';
-        if (curr->children[idx] == NULL) {
-            curr->children[idx] = create_node();
+int common_prefix_len(const char* a, const char* b){
+    int i = 0;
+    while(a[i] && b[i] && a[i] == b[i]) i++;
+    return i;
+}
+
+void radix_insert(RadixNode* node, const char* word){
+    for(int = 0; i < node->num_edges; i++){
+        RadixEdge* edge = &node->edges[i];
+        int prefix_len = common_prefix_len(edge->label, word);
+
+        if(prefix_len == 0) continue;
+        
+        if(prefix_len == strlen(edge->label)){
+            
+            radix_insert(edge->child, word + prefix_len);
+            return;
         }
-        curr = curr->children[idx];
+
+        RadixNode* split_node = radix_create_node();
+
+        RadixEdge old_suffix = {
+            .label = strdup(edge->label + prefix_len),
+            .child = edge->child
+        };
+
+        RadixEdge = new_edge = {
+            .label = strdup(word + prefix_len),
+            .child = radix_create_node()
+        };
+        new_edge.child->is_end_of_word = 1;
+        new_edge.child->frequency = 1;
+
+        split_node->edges = malloc(2 * sizeof(RadixEdge));
+        split_node->edges[0] = old_suffix;
+        split_node->edges[1] = new_edge;
+        split_node->num_edges = 2;
+        split_node->cap_edges = 2;
+
+        free(edge->label);
+        edge->label = strndup(edge->label, prefix_len);
+        edge->child = split_node;
+
+        return;
     }
-    curr->is_end_of_word = 1;
+    
+    //no match insert new edge
+    if(node->num_edges == node->cap_edges){
+        node->cap_edges = node->cap_edges ? node->cap_edges * 2 : 2;
+        node->edges = realloc(node->edges, node->cap_edges * sizeof(RadixEdge));
+    }
+
+    RadixEdge new_edge = {
+        .label = strdup(word),
+        .child = radix_create_node()
+    };
+    new_edge.child->is_end_of_word = 1;
+    new_edge.child->frequency = 1;
+    
+    node->edges[node->num_edges++] = new_edge;
 }
 
-int search(TrieNode* root, const char* word) {
-    TrieNode* curr = root;
-    for (int i = 0; word[i] != '\0'; i++) {
-        int idx = word[i] - 'a';
-        if (curr->children[idx] == NULL)
-            return 0;
-        curr = curr->children[idx];
+bool radix_search(const RadixNode* node, const char* word){
+    
+    if(word[0] == '\0'){
+        return node->is_end_of_word != 0;
     }
-    return curr != NULL && curr->is_end_of_word;
-}
+    
+    for(int i = 0; i < node->num_edges; ++i){
+        const RadixEdge* edge = &node->edges[i];
+        
+        int k = common_prefix_len(edge->label, word);
 
-TrieNode* find_prefix_node(TrieNode* root, const char* prefix) {
-    TrieNode* curr = root;
-    for (int i = 0; prefix[i] != '\0'; i++) {
-        int idx = prefix[i] - 'a';
-        if (curr->children[idx] == NULL)
-            return NULL;
-        curr = curr->children[idx];
-    }
-    return curr;
-}
-
-void dfs_collect(TrieNode* node, char* buffer, int depth) {
-    if (node->is_end_of_word) {
-        buffer[depth] = '\0';
-        printf("- %s\n", buffer);
-    }
-
-    for (int i = 0; i < ALPHABET_SIZE; i++) {
-        if (node->children[i]) {
-            buffer[depth] = 'a' + i;
-            dfs_collect(node->children[i], buffer, depth + 1);
+        if (k == 0) continue;
+        
+        if(k < (int)strlen(edge->label)){
+            return false;
         }
+            
+        if(word[k] == '\0'){
+            return edge->child->is_end_of_word != 0;
+        }
+        return radix_search(edge->child, word + k);
     }
+    
+    return false;
 }
 
-void normalize(char* word) {
-    for(int i = 0; word[i] != '\0'; i++){
-        word[i] = tolower((unsigned char)word[i]);
+const RadixNode* radix_find_prefix(const RadixNode* node, const char* prefix){
+    if(prefix[0] == '\0') return node;
+    //for the current node, check all the edges the node contains
+    for(int i =0; i < node->num_edges; ++i){
+        const RadixEdge* edge = &node->edges[i]; //get their mem addrs
+        //calculate the no. of common chars 
+        int k = common_prefix_len(edge->label, prefix);
+        
+        if (k == 0) continue;
+        //we wouldn't be hitting another node where we can look to more edges
+        if(k < (int)strlen(edge->label)) return NULL; //i.e. we'd end in middle of an edg
+        
+        if(prefix[k] == '\0') return edge->child;
+
+        return radix_find_prefix(edge->child, prefix + k);
     }
-}
 
-char* complete_first_match(TrieNode* root, const char* prefix){
-    TrieNode* start = find_prefix_node(root, prefix);
-    if(!start) return NULL;
-
-    char buffer[MAX_WORD_LEN];
-    strcpy(buffer, prefix);
-
-    if(dfs_first(start, buffer, strlen(prefix))){
-        char* result = malloc(strlen(buffer) + 1);
-        strcpy(result, buffer);
-        return result;
-    }
     return NULL;
 }
 
-
-void autocomplete(TrieNode* root, const char* prefix) {
-    TrieNode* start = find_prefix_node(root, prefix);
-    if (!start) {
-        printf("No suggestions for '%s'\n", prefix);
-        return;
+static void push_string(char*** out, int* n, int* cap, const char* s){
+    if(*n == *cap){
+        *cap = (*cap == 0) ? 8 : (*cap * 2);
+        *out = realloc(*out, (*cap) * size(char*));
     }
-
-    char buffer[MAX_WORD_LEN];
-    strcpy(buffer, prefix);
-    dfs_collect(start, buffer, strlen(prefix));
+    (*out)[(*n)++] = strdup(s);
 }
 
-void destroy_trie(TrieNode* node) {
-    if (!node) return;
-    for (int i = 0; i < ALPHABET_SIZE; i++) {
-        destroy_trie(node->children[i]);
-    }
-    free(node);
-}
+
+
+
 
