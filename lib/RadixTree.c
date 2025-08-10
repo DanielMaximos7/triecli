@@ -1,101 +1,138 @@
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 
 typedef struct RadixNode RadixNode;
 
 typedef struct {
-    char* label;
-    uint16_t len;
-    uint8_t first;
-    RadixNode* child;
+    char       *label;
+    uint16_t    len;
+    uint8_t     first;
+    RadixNode  *child;
 } RadixEdge;
 
 struct RadixNode {
-    RadixEdge* edges;
-    int num_edges;
-    int cap_edges;
-    int is_end_of_word;
-    int frequency;
+    RadixEdge  *edges;
+    uint16_t    num_edges;
+    uint16_t    cap_edges;  
+    uint16_t    frequency;
+    uint16_t    is_end_of_word : 1;
 };
 
-RadixNode* radix_create_node(){
-    RadixNode* node = malloc(sizeof(RadixNode));
-    if(!node) return NULL;
+/* HELPER FUNCTIONS  */
+
+static inline void edge_set_label(RadixEdge *e, char *owned_cstr) {
+    e->label = owned_cstr;
+    e->len = (uint16_t)strlen(owned_cstr); //cache length of str 
+    e->first = e->len ? (uint8_t)owned_cstr[0] : 0; //cache first byte of str
+}
+
+static inline void edge_replace_label(RadixEdge *e, char *owned_ctsr) {
+    char *old = e->label;
+    edge_set_label(e, owned_ctsr);
+    free(old);
+}
+
+/* Walks both strings up to a_len or until a mismatch/null in b, returns the match len */
+int common_prefix_len(const char *a, int a_len, const char *b) {
+    int i;
+    
+    for (i = 0; i < a_len; ++i) {
+        char cb = b[i];
+        if (cb == '\0' || a[i] != cb) 
+            break;
+    }
+    
+    return i;
+}
+
+/* Binary search for the first edge whose first byte is >= key  */
+static int lower_bound_first(const RadixEdge *a, int n, uint8_t key) {
+    int lo = 0, hi = n;
+    
+    while (lo < hi) {
+        int mid = (lo + hi) >> 1;
+        
+        if (a[mid].first < key) 
+            lo = mid + 1;
+        else 
+            hi = mid;
+    }
+
+    return lo;
+}
+
+/* Binary search for the first edge whose first byte is > key */
+static int upper_bound_first(const RadixEdge *a, int n, uint8_t key) {
+    int lo = 0, hi = n;
+    
+    while (lo < hi) {
+        int mid = (lo + hi) >> 1;
+        
+        if (a[mid].first <= key) 
+            lo = mid + 1;
+        else 
+            hi = mid;
+    }
+
+    return lo;
+}
+
+/* Ensures node->edges has capacity for at least min_cap entries, growing if needed */
+static bool grow_edges(RadixNode *node, int min_cap) {
+    if(node->edges && node->cap_edges >= min_cap)
+        return true;
+
+    int cap = node->cap_edges ? node->cap_edges : 2;
+    while (cap < min_cap) 
+        cap <<= 1;
+    
+    if((size_t)cap > SIZE_MAX / sizeof *node->edges)
+        return false;
+
+    RadixEdge *p = realloc(node->edges, (size_t)cap * sizeof *p);
+    if (!p) 
+        return false;
+
+    node->edges = p; 
+    node->cap_edges = cap;
+    return true;
+}
+
+/* Insert edge e into node->edges, maintaining ascending order by first byte */
+static bool node_insert_edge_sorted(RadixNode *node, RadixEdge e) {
+    if (node->num_edges == node->cap_edges)
+        if (!grow_edges(node, node->num_edges + 1))
+                return false;
+    
+    int pos = upper_bound_first(node->edges, node->num_edges, e.first);
+    
+    /* Move existing edges at and after pos one slot to the right */
+    memmove(&node->edges[pos + 1], &node->edges[pos], (size_t)(node->num_edges - pos) * sizeof(RadixEdge));
+
+    node->edges[pos] = e;
+    node->num_edges++;
+    return true;
+}
+
+/* CORE API  */
+
+/* */
+RadixNode* radix_create_node(void) {
+    RadixNode *node = malloc(sizeof(RadixNode));
+    if(!node) 
+        return NULL;
 
     node->edges = NULL;
     node->num_edges = 0;
     node->cap_edges = 0;
     node->is_end_of_word = 0;
     node->frequency = 0;
+    
     return node;
-}
-
-static inline void edge_set_label(RadixEdge* e, char* owned_ctsr){
-    e->label = owned_ctsr;
-    e->len = (uint16_t)strlen(owned_ctsr); //cache length of str 
-    e->first = e->len ? (uint8_t)owned_ctsr[0] : 0; //cache first byte of str
-}
-
-static inline void edge_replace_label(RadixEdge* e, char* owned_ctsr){
-    char* old = e->label;
-    edge_set_label(e, owned_ctsr);
-    free(old);
-}
-
-int common_prefix_len(const char* a, int a_len,  const char* b){
-    int i = 0;
-    for(; i < a_len; ++i){
-        char cb = b[i];
-        if(cb == '\0' || a[i] != cb) break;
-    }
-
-    return i;
-}
-
-static int lower_bound_first(const RadixEdge* a, int n, uint8_t key){
-    int lo = 0, hi = n;
-    while(lo < hi){
-        int mid = (lo + hi) >> 1;
-        if(a[mid].first < key) lo = mid + 1;
-        else hi = mid;
-    }
-    return lo;
-}
-
-static int upper_bound_first(const RadixEdge* a, int n, uint8_t key){
-    int lo = 0, hi = n;
-    while(lo < hi){
-        int mid = (lo + hi) >> 1;
-        if(a[mid].first <= key) lo = mid + 1;
-        else hi = mid;
-    }
-    return lo;
-}
-/* adding more memory for  edges to a node */
-static bool grow_edges(RadixNode* node, int need){
-    int cap = node->cap_edges ? node->cap_edges : 2;
-    while(cap < need) cap <<= 1;
-    RadixEdge* p = realloc(node->edges, (size_t)cap * sizeof *p);
-    if (!p) return false;
-    node->edges = p; node->cap_edges = cap;
-}
-
-/* inserting an edge within a node - alphabetic pos  */
-static bool node_insert_edge_sorted(RadixNode* node, RadixEdge e){
-    if(node->num_edges == node->cap_edges)
-        if(!grow_edges(node, node->num_edges + 1))
-                return false;
-    
-    int pos = upper_bound_first(node->edges, node->num_edges, e.first);
-    
-    //moving everything at pos and beyond right by a position
-    memmove(&node->edges[pos+1], &node->edges[pos], (size_t)(node->num_edges - pos) * sizeof(RadixEdge));
-
-    node->edges[pos] = e;
-    node->num_edges++;
-    return true;
 }
 
 void radix_insert(RadixNode* node, const char* word){
