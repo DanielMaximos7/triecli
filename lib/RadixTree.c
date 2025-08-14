@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,6 +25,27 @@ struct RadixNode {
 
 /* HELPER FUNCTIONS  */
 
+/* Duplicate a full string, exit on allocation failure */
+static char *xstrdup(const char *s){
+    char *dup = strdup(s);
+    if(!dup){
+        perror("strdup");
+        exit(EXIT_FAILURE);
+    }
+    return dup;
+}
+
+/* Duplicate at most n bytes of a string, exit on allocation failure */
+static char *xstrndup(const char *s, size_t n){
+    char *dup = strndup(s, n);
+    if(!dup){
+        perror("strdup");
+        exit(EXIT_FAILURE);
+    }
+    return dup;
+}
+
+__attribute__((noinline))
 static inline void edge_set_label(RadixEdge *e, char *owned_cstr) {
     e->label = owned_cstr;
     e->len = (uint16_t)strlen(owned_cstr); //cache length of str 
@@ -120,7 +142,7 @@ static bool node_insert_edge_sorted(RadixNode *node, RadixEdge e) {
 
 /* CORE API  */
 
-/* */
+/* Initializes a new RadixNode structure */
 RadixNode* radix_create_node(void) {
     RadixNode *node = malloc(sizeof(RadixNode));
     if(!node) 
@@ -135,21 +157,30 @@ RadixNode* radix_create_node(void) {
     return node;
 }
 
-void radix_insert(RadixNode* node, const char* word){
-    for(int i = 0; i < node->num_edges; i++){
+/* Inserts a string 'word' into the radix tree given a node of the tree */
+void radix_insert(RadixNode *node, const char *word) {
+    
+    if(word[0] == '\0') {
+        node->is_end_of_word = 1;
+        return;
+    }
+
+    for (int i = 0; i < node->num_edges; i++) {
         RadixEdge* edge = &node->edges[i];
+        
         int prefix_len = common_prefix_len(edge->label, edge->len ,word);
 
-        if(prefix_len == 0) continue;
+        if(prefix_len == 0) 
+            continue;
         
-        if(prefix_len == edge->len){
-            
+        if (prefix_len == edge->len) {
             radix_insert(edge->child, word + prefix_len);
             return;
         }
 
+        //given the instance where prefix_len < edge->len and > 0 we have to create a split
         RadixNode* split_node = radix_create_node();
-        
+               
         RadixEdge old_suffix = {0};
         edge_set_label(&old_suffix, xstrdup(edge->label + prefix_len));
         old_suffix.child = edge->child;
@@ -159,15 +190,15 @@ void radix_insert(RadixNode* node, const char* word){
         new_edge.child = radix_create_node();
         new_edge.child->is_end_of_word = 1;
         new_edge.child->frequency = 1;
-
-        if(!node_insert_edge_sorted(split_node, old_suffix)){
-            return;
+        
+        if(word[prefix_len] == '\0') {
+            split_node->is_end_of_word = 1;
         }
 
-        if(!node_insert_edge_sorted(split_node, new_edge)){
-            return;
-        }
-      
+        if(!node_insert_edge_sorted(split_node, old_suffix)) return;
+
+        if(!node_insert_edge_sorted(split_node, new_edge)) return;
+     
         edge->child = split_node;
         edge_replace_label(edge, xstrndup(edge->label, (size_t)prefix_len));
         
@@ -182,48 +213,49 @@ void radix_insert(RadixNode* node, const char* word){
 
     
     RadixEdge e = {0};
-
     edge_set_label(&e, xstrdup(word));
     e.child = radix_create_node();
-
     e.child->is_end_of_word = 1;
     e.child->frequency = 1;
+
     //inserts the new node in the right pos
     if(!node_insert_edge_sorted(node, e)){
         return;
     }
 }
 
-bool radix_search(const RadixNode* node, const char* word){
+/* searches the tree and returns true if the radix tree contains 'word' */
+bool radix_search(const RadixNode *node, const char *word) {
     
-    if(word[0] == '\0'){
+    if (word[0] == '\0') {
         return node->is_end_of_word != 0;
     }
     
-    for(int i = 0; i < node->num_edges; ++i){
+    for (int i = 0; i < node->num_edges; ++i) {
         const RadixEdge* edge = &node->edges[i];
         
         int k = common_prefix_len(edge->label, edge->len,word);
 
-        if (k == 0) continue;
+        if (k == 0) 
+            continue;
         
-        if(k < (int)edge->len){
+        if (k < (int)edge->len)
             return false;
-        }
+        
             
-        if(word[k] == '\0'){
+        if (word[k] == '\0')
             return edge->child->is_end_of_word != 0;
-        }
+
         return radix_search(edge->child, word + k);
     }
     
     return false;
 }
 
-const RadixNode* radix_find_prefix(const RadixNode* node, const char* prefix){
+/* Returns the node at which the string 'prefix' ends, or NULL if not path in the radix tree spells 'prefix' */
+const RadixNode* radix_find_prefix(const RadixNode *node, const char *prefix) {
     if(prefix[0] == '\0') return node;
-    //for the current node, check all the edges the node contains
- 
+
     uint8_t ch = (uint8_t)prefix[0];
 
     int hi = upper_bound_first(node->edges, node->num_edges, ch);
@@ -234,27 +266,40 @@ const RadixNode* radix_find_prefix(const RadixNode* node, const char* prefix){
         //calculate the no. of common chars 
         int k = common_prefix_len(edge->label, edge->len,prefix);
         
-        if (k == 0) continue;
-        //we wouldn't be hitting another node where we can look to more edges
-        if(k < (int)edge->len) return NULL; //i.e. we'd end in middle of an edg
+        if (k == 0) 
+            continue;
         
-        if(prefix[k] == '\0') return edge->child;
+        //we wouldn't be hitting another node where we can look to more edges
+        if(k < (int)edge->len) {
+            if(prefix[k] == '\0') {
+                return edge->child;
+            }
+            return NULL;
+        }
 
         return radix_find_prefix(edge->child, prefix + k);
     }
 
+
     return NULL;
 }
 
-static void push_string(char*** out, int* n, int* cap, const char* s){
-    if(*n == *cap){
-        *cap = (*cap == 0) ? 8 : (*cap * 2);
-        *out = realloc(*out, (*cap) * sizeof(char*));
+static bool push_string(char*** out, int* n, int* cap, const char* s){
+    if (*n == *cap){
+        int new_cap = (*cap == 0) ? 8 : (*cap * 2);
+        char** tmp = realloc(*out, (size_t)new_cap * sizeof *tmp);
+        if (!tmp) return false;   // no change to *out on OOM
+        *out = tmp;
+        *cap = new_cap;
     }
-    (*out)[(*n)++] = strdup(s);
+    char* copy = strdup(s);
+    if (!copy) return false;
+    (*out)[*n] = copy;
+    (*n)++;
+    return true;
 }
 
-static void dfs_collect(const RadixNode* node, char** ptr_ buffer, int buf_len, int* ptr_bcap, char*** out, int* out_n, int* out_cap){
+static void dfs_collect(const RadixNode* node, char** ptr_buffer, int buf_len, int* ptr_bcap, char*** out, int* out_n, int* out_cap){
     
     //ptr_ to callers buffer scratch and cap
     char* buffer = *ptr_buffer;
@@ -289,6 +334,9 @@ static void dfs_collect(const RadixNode* node, char** ptr_ buffer, int buf_len, 
         memcpy(buffer + buf_len, e->label, lab_len);
 
         dfs_collect(e->child, ptr_buffer, buf_len + lab_len, ptr_bcap, out, out_n, out_cap);
+
+        buffer = *ptr_buffer;
+        buf_cap = *ptr_bcap;
     }
 }
 
