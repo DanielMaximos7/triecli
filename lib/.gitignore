@@ -1,0 +1,4 @@
+Makefile
+*.swp
+test.txt
+.vscode/
