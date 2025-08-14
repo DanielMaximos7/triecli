@@ -10,17 +10,17 @@ typedef struct RadixNode RadixNode;
 
 typedef struct {
     char       *label;
-    uint16_t    len;
+    uint32_t    len;
     uint8_t     first;
     RadixNode  *child;
 } RadixEdge;
 
 struct RadixNode {
     RadixEdge  *edges;
-    uint16_t    num_edges;
-    uint16_t    cap_edges;  
-    uint16_t    frequency;
-    uint16_t    is_end_of_word : 1;
+    uint32_t    num_edges;
+    uint32_t    cap_edges;  
+    uint32_t    frequency;
+    uint32_t    is_end_of_word : 1;
 };
 
 /* HELPER FUNCTIONS  */
@@ -104,15 +104,15 @@ static int upper_bound_first(const RadixEdge *a, int n, uint8_t key) {
 }
 
 /* Ensures node->edges has capacity for at least min_cap entries, growing if needed */
-static bool grow_edges(RadixNode *node, int min_cap) {
+static bool grow_edges(RadixNode *node, uint32_t min_cap) {
     if(node->edges && node->cap_edges >= min_cap)
         return true;
 
-    int cap = node->cap_edges ? node->cap_edges : 2;
+    uint32_t cap = node->cap_edges ? node->cap_edges : 2;
     while (cap < min_cap) 
         cap <<= 1;
     
-    if((size_t)cap > SIZE_MAX / sizeof *node->edges)
+    if(cap > SIZE_MAX / sizeof *node->edges)
         return false;
 
     RadixEdge *p = realloc(node->edges, (size_t)cap * sizeof *p);
@@ -168,7 +168,7 @@ void radix_insert(RadixNode *node, const char *word) {
     for (int i = 0; i < node->num_edges; i++) {
         RadixEdge* edge = &node->edges[i];
         
-        int prefix_len = common_prefix_len(edge->label, edge->len ,word);
+        uint32_t prefix_len = common_prefix_len(edge->label, edge->len ,word);
 
         if(prefix_len == 0) 
             continue;
@@ -184,31 +184,32 @@ void radix_insert(RadixNode *node, const char *word) {
         RadixEdge old_suffix = {0};
         edge_set_label(&old_suffix, xstrdup(edge->label + prefix_len));
         old_suffix.child = edge->child;
-
-        RadixEdge new_edge = {0};
-        edge_set_label(&new_edge, xstrdup(word + prefix_len));
-        new_edge.child = radix_create_node();
-        new_edge.child->is_end_of_word = 1;
-        new_edge.child->frequency = 1;
         
         if(word[prefix_len] == '\0') {
             split_node->is_end_of_word = 1;
-        }
+        } else {
 
+            RadixEdge new_edge = {0};
+            edge_set_label(&new_edge, xstrdup(word + prefix_len));
+            new_edge.child = radix_create_node();
+            new_edge.child->is_end_of_word = 1;
+            new_edge.child->frequency = 1;
+            //TODO: handle failure
+            if(!node_insert_edge_sorted(split_node, new_edge)) return;
+        }
+            //same idea here
         if(!node_insert_edge_sorted(split_node, old_suffix)) return;
 
-        if(!node_insert_edge_sorted(split_node, new_edge)) return;
-     
         edge->child = split_node;
         edge_replace_label(edge, xstrndup(edge->label, (size_t)prefix_len));
         
         return;
     }
     
-    //no match insert new edge //TODO: Realloc clobber risk...
+    //increase the cap of edges
     if(node->num_edges == node->cap_edges){
-        node->cap_edges = node->cap_edges ? node->cap_edges * 2 : 2;
-        node->edges = realloc(node->edges, node->cap_edges * sizeof(RadixEdge));
+        if (!grow_edges(node, node->num_edges + 1))
+            return;
     }
 
     
@@ -220,6 +221,9 @@ void radix_insert(RadixNode *node, const char *word) {
 
     //inserts the new node in the right pos
     if(!node_insert_edge_sorted(node, e)){
+        //event of insertion failure free memory
+        free(e.label);
+        radix_free_node(e.child);
         return;
     }
 }
